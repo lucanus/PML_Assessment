@@ -1,0 +1,224 @@
+---
+title: "Analysis Report"
+output: html_document
+---
+
+
+```{r load-libraries, cache=TRUE, message=FALSE}
+library(caret)
+```
+
+##Read data and select the predictors.
+
+*I escluded these variables from dataset to obtain model predixtors:*
+
+- X: a counter index;
+
+- user_name: the name of men who performed the exercices;
+
+- cvtd_timestamp: the date and time of exercises;
+
+- new_window and num_window: not understendable variables
+
+```{r read-data-and-select-predictors, cache=TRUE}
+data<- read.csv("./pml-training.csv")
+predictors<- data[, -c(1,2,5,6,7,160)]
+dim(predictors)
+
+```
+
+*Then I looked at the characterisitcs of the other variables.*
+
+```{r, cache=TRUE}
+str(predictors, list.len=dim(predictors)[2])
+```
+
+*It appeared that factor variables with 4 or minus levels were not informative. I
+ excluded all these variables.*
+
+*The observations of the other factor variables were mostly NA. There were also
+ numeric variables whit a lot of NA observations.*
+*I decided to exclude those variables that had a number of NA observations more than
+ 75% of total observations.*
+
+```{r continuing-select-predictors, cache=TRUE, warning=FALSE}
+
+indx<- vector()
+for(i in 1:dim(predictors)[2]){
+        if(class(predictors[,i]) =="factor") {
+                if( length( levels(predictors[,i]) ) <= 4 ) {
+                        indx<- c(indx, i)    
+                }
+                else {
+                        predictors[,i]<- as.numeric(as.character(predictors[,i]))
+                        if(sum(!is.na(predictors[,i])) < dim(predictors)[1]/4) {
+                                indx<- c(indx, i)
+                        }
+                }
+        }
+        else if(sum(!is.na(predictors[,i])) < dim(predictors)[1]/4) {
+                indx<- c(indx, i)
+        }
+}
+
+predictors<- predictors[,-indx]
+dim(predictors)
+
+```
+
+## Partitioning and preprocessing data
+
+```{r partitioning, cache=TRUE}
+set.seed(3344)
+newData<- predictors
+newData$classe<- data$classe
+inTrain<- createDataPartition(newData$classe, p=0.75, list=FALSE)
+training<- newData[inTrain,]
+testing<- newData[-inTrain,]
+
+```
+
+*After partitioning data in training and testing sets, I preprocessed training set
+using "knnImpute" method for NA values and "pca" method (Principal Component)
+to reduce the dimensions of problem. I took the first 10 components.*
+
+```{r preprocessing-PCA, cache=TRUE}
+set.seed(1314)
+prComp<- preProcess(training[, -dim(training)[2]], method=c("knnImpute","pca"),
+                    pcaComp=10)
+
+prCompTraining<- predict(prComp, newdata=training[, -dim(training)[2]])
+prCompTesting<- predict(prComp, newdata=testing[, -dim(testing)[2]])
+
+```
+
+
+## Select prediction model
+
+*I made a competition between three models.*
+
+
+###1)
+
+*First I considered a* **bagging tree** *model with method="treebag" in train function:*
+
+```{r bagging-and-tree, cache=TRUE}
+set.seed(1122)
+t1<- Sys.time()
+model_bagtree<- train(training$classe ~., data=prCompTraining, method="treebag")
+int<- difftime(Sys.time(), t1, units="secs")
+predict_bagtree<- predict(model_bagtree, newdata=prCompTesting)
+M<-confusionMatrix(predict_bagtree, testing$classe)
+M
+
+```
+
+*the time of execution were `r round(int,2)` seconds and the accuracy `r M$overall[1]`.*
+
+
+###2)
+
+*Then I took a* **random forest** *model: I tried for trees number equal to 20, 50,
+ 100 and 150, and I signed accuracy:*
+ 
+ 
+ **Trees number**     |  **Accuracy**       |   **System Time**
+ 
+ **20**  | **0.9488** | **84.26 secs**
+ 
+ **50**  | **0.9507** | **206.96 secs**
+ 
+ **100**  | **0.9535** | **387.70 secs**
+ 
+ **150**  | **0.9578** | **574.58 secs**
+ 
+  
+*then I decided to use ntree=50 value in train function.*
+
+```{r random-forest, cache=TRUE}
+set.seed(2323)
+t1<- Sys.time()
+model_rf<- train(training$classe ~., data=prCompTraining, method="rf", ntree=50)
+int<- difftime(Sys.time(), t1, units="secs")
+predict_rf<- predict(model_rf, newdata=prCompTesting)
+confusionMatrix(predict_rf, testing$classe)
+
+```
+
+*the time of execution were `r round(int,2)` seconds and the accuracy `r M$overall[1]`.*
+
+
+*The following plot display the percentage rate error over the number of tree:*
+
+```{r plot-rf, cache=TRUE, include=TRUE, fig.height=6, fig.width=8, fig.align='center', dev='png', fig.path=("./figure/")}
+
+plot(model_rf$finalModel$err.rate[,1], main="Random Forest Models",
+     xlab="Number of Trees", ylab="Percentage Error", pch=19, cex=1, col="red")
+
+```
+
+
+###3)
+*Finally I took a* **boosting tree** *model, using method="gbm" in train function.
+ This algorithm take a lot of time and pc memory.*
+
+```{r boosting-and-tree, cache=TRUE}
+set.seed(3344)
+t1<- Sys.time()
+model_boostree<- train(training$classe ~., data=prCompTraining, method="gbm",
+                       verbose=FALSE)
+int<- difftime(Sys.time(), t1, units="secs")
+predict_boostree<- predict(model_boostree, newdata=prCompTesting)
+M<-confusionMatrix(predict_boostree, testing$classe)
+M
+```
+
+*the time of execution were `r round(int,2)` seconds and the accuracy `r M$overall[1]`.*
+
+
+**A the end, the best model was the random forest model (lower system time and higher accuracy), and I used it as prediction alghoritm for "class" variable of the 20
+observation of pml-testing.csv file**
+
+
+##Predictions##
+
+*First of all I made over new dataset in pml-testing.csv file, just applying the same
+transformations applied to data in pml-training.csv file:*
+
+```{r new-predictors, cache=TRUE}
+
+newObsData<- read.csv("./pml-testing.csv")
+newObsPredictors<- newObsData[, -c(1,2,5,6,7,160)]
+newObsPredictors<- newObsPredictors[, -indx]
+dim(newObsPredictors)
+```
+
+*I checked the predictors were the same for old and new dataset.*
+
+```{r control-predictor, cache=TRUE}
+
+k<- 0
+for(j in 1:dim(predictors)[2]) {
+        if(names(predictors)[j]==names(newObsPredictors)[j]) {
+                k<- k + 1.
+        }
+}
+if(k == dim(predictors)[2]) print("Predictors are the same")
+```
+
+*And I calculated the same principal component applied before to data in pml-training.csv file.*
+
+```{r pca-on-new-predictors, cache=TRUE}
+
+prCompNewObsPredictors<- predict(prComp, newdata=newObsPredictors)
+```
+
+*Then I could make predictions:*
+
+```{r predictions, cache=TRUE}
+
+newPredictions<- predict(model_rf, newdata=prCompNewObsPredictors)
+newPredictions
+```
+
+
