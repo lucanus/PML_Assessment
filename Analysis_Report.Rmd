@@ -141,8 +141,8 @@ t1<- Sys.time()
 model_rf<- train(training$classe ~., data=prCompTraining, method="rf", ntree=50)
 int<- difftime(Sys.time(), t1, units="secs")
 predict_rf<- predict(model_rf, newdata=prCompTesting)
-confusionMatrix(predict_rf, testing$classe)
-
+M<- confusionMatrix(predict_rf, testing$classe)
+M
 ```
 
 *the time of execution were `r round(int,2)` seconds and the accuracy `r M$overall[1]`.*
